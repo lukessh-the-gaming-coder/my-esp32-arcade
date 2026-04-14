@@ -4,23 +4,23 @@
   <title>ESP32 Cloud Arcade - Snake</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
-    /* Prevents zoom/delay on mobile */
+    /* Prevents zoom/delay and accidental selections on mobile */
     * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; }
     body { background: #111; color: #0f0; text-align: center; font-family: 'Courier New', monospace; margin: 0; }
     canvas { background: #000; display: block; margin: 10px auto; border: 3px solid #0f0; max-width: 90vw; box-shadow: 0 0 15px #0f0; }
     
     .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 280px; margin: 15px auto; }
     button { 
-      padding: 20px; font-size: 25px; background: #222; color: #0f0; 
+      padding: 25px; font-size: 30px; background: #222; color: #0f0; 
       border: 2px solid #0f0; border-radius: 12px; cursor: pointer;
     }
     button:active { background: #0f0; color: #000; }
     .empty { visibility: hidden; }
-    .score-box { font-size: 20px; margin: 5px; color: #0f0; }
+    .score-box { font-size: 24px; margin: 10px; color: #0f0; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h2 style="margin: 10px;">CLOUDSNAKE</h2>
+  <h2 style="margin: 10px; letter-spacing: 5px;">SNAKE ARCADE</h2>
   <div class="score-box" id="scoreDisplay">Score: 0</div>
   <canvas id="game" width="400" height="400"></canvas>
   
@@ -42,14 +42,15 @@
     let d = "right";
     let nextD = "right"; 
     let lastTime = 0;
-    const speed = 150; // Slower speed as requested (Higher = Slower)
+    let isGameOver = false; // Prevents the glitchy multiple prompts
+    const speed = 150; // Speed: 150ms (Higher = Slower)
 
-    // GOOGLE FORM CONFIGURATION
+    // GOOGLE FORM CONFIGURATION (Using your specific IDs)
     const formID = "1FAIpQLSeUexRWPrEYccVHlEfZl0xvcWlUJ1mp6eKwdnTHiJ-vFh-hxA";
     const nameID = "entry.1544627247";
     const scoreID = "entry.1856974321";
 
-    // Keyboard Input
+    // Keyboard Input for Laptops
     document.addEventListener("keydown", e => {
       if(e.keyCode == 37 && d != "right") nextD = "left";
       if(e.keyCode == 38 && d != "down") nextD = "up";
@@ -57,7 +58,7 @@
       if(e.keyCode == 40 && d != "up") nextD = "down";
     });
 
-    // Mobile/Button Input
+    // Mobile Input Logic
     function changeDir(dir) { 
       if(dir == "left" && d != "right") nextD = "left";
       if(dir == "up" && d != "down") nextD = "up";
@@ -65,6 +66,7 @@
       if(dir == "down" && d != "up") nextD = "down";
     }
 
+    // Send data to your Google Sheet
     function sendToLeaderboard(playerName, finalScore) {
         const baseURL = `https://docs.google.com/forms/d/e/${formID}/formResponse`;
         const formData = new FormData();
@@ -73,13 +75,16 @@
 
         fetch(baseURL, { method: 'POST', mode: 'no-cors', body: formData })
         .then(() => {
-            alert("Score saved to Cloud Leaderboard!");
+            alert("Score saved! Check your Google Sheet.");
             location.reload();
         })
         .catch(() => location.reload());
     }
 
+    // Main Game Loop
     function main(currentTime) {
+      if (isGameOver) return; // Stop the loop if crashed
+      
       window.requestAnimationFrame(main);
       const secondsSinceLastRender = (currentTime - lastTime);
       if (secondsSinceLastRender < speed) return;
@@ -99,7 +104,7 @@
       if(d == "right") headX += box;
       if(d == "down") headY += box;
 
-      // Wall Wrapping Logic
+      // Wall Wrapping (Teleport to other side)
       if (headX < 0) headX = canvasSize - box;
       else if (headX >= canvasSize) headX = 0;
       if (headY < 0) headY = canvasSize - box;
@@ -108,17 +113,22 @@
       const newHead = {x: headX, y: headY};
 
       // Check Self-Collision
-      for(let i=0; i<snake.length; i++) {
+      for(let i = 0; i < snake.length; i++) {
         if(newHead.x == snake[i].x && newHead.y == snake[i].y) {
+          isGameOver = true; 
           let score = snake.length - 1;
-          let name = prompt("🏆 GAME OVER!\nScore: " + score + "\nEnter Name:", "Player 1");
-          if (name) sendToLeaderboard(name, score);
-          else location.reload();
+          
+          // Delay prompt slightly so you can see the crash
+          setTimeout(() => {
+            let name = prompt("🏆 GAME OVER!\nYour Score: " + score + "\nEnter name for Leaderboard:", "Player");
+            if (name) sendToLeaderboard(name, score);
+            else location.reload();
+          }, 150);
           return;
         }
       }
 
-      // Food Logic
+      // Check if food eaten
       if(headX == food.x && headY == food.y) {
         food = { x: Math.floor(Math.random()*19)*box, y: Math.floor(Math.random()*19)*box };
         document.getElementById("scoreDisplay").innerText = "Score: " + (snake.length);
@@ -129,20 +139,22 @@
     }
 
     function draw() {
+      // Background
       ctx.fillStyle = "black";
       ctx.fillRect(0,0,canvasSize,canvasSize);
       
-      // Draw Snake
+      // Snake Rendering
       snake.forEach((part, index) => {
         ctx.fillStyle = index === 0 ? "#0f0" : "#050";
         ctx.fillRect(part.x, part.y, box-1, box-1);
       });
 
-      // Draw Food
+      // Food Rendering
       ctx.fillStyle = "red";
       ctx.fillRect(food.x, food.y, box-1, box-1);
     }
 
+    // Start Game
     window.requestAnimationFrame(main);
   </script>
 </body>
