@@ -1,25 +1,27 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ESP32 Pro Arcade</title>
+  <title>ESP32 Cloud Arcade - Snake</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
-    /* Prevents selecting text and zooming when tapping fast */
+    /* Prevents zoom/delay on mobile */
     * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; }
     body { background: #111; color: #0f0; text-align: center; font-family: 'Courier New', monospace; margin: 0; }
-    canvas { background: #000; display: block; margin: 10px auto; border: 3px solid #0f0; max-width: 95vw; }
+    canvas { background: #000; display: block; margin: 10px auto; border: 3px solid #0f0; max-width: 90vw; box-shadow: 0 0 15px #0f0; }
     
-    .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 280px; margin: 20px auto; }
+    .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 280px; margin: 15px auto; }
     button { 
-      padding: 25px; font-size: 30px; background: #222; color: #0f0; 
-      border: 2px solid #0f0; border-radius: 15px; cursor: pointer;
+      padding: 20px; font-size: 25px; background: #222; color: #0f0; 
+      border: 2px solid #0f0; border-radius: 12px; cursor: pointer;
     }
     button:active { background: #0f0; color: #000; }
     .empty { visibility: hidden; }
+    .score-box { font-size: 20px; margin: 5px; color: #0f0; }
   </style>
 </head>
 <body>
   <h2 style="margin: 10px;">CLOUDSNAKE</h2>
+  <div class="score-box" id="scoreDisplay">Score: 0</div>
   <canvas id="game" width="400" height="400"></canvas>
   
   <div class="controls">
@@ -40,9 +42,14 @@
     let d = "right";
     let nextD = "right"; 
     let lastTime = 0;
-    const speed = 130; // Change to 150 for even slower, 100 for faster
+    const speed = 150; // Slower speed as requested (Higher = Slower)
 
-    // Input Handling
+    // GOOGLE FORM CONFIGURATION
+    const formID = "1FAIpQLSeUexRWPrEYccVHlEfZl0xvcWlUJ1mp6eKwdnTHiJ-vFh-hxA";
+    const nameID = "entry.1544627247";
+    const scoreID = "entry.1856974321";
+
+    // Keyboard Input
     document.addEventListener("keydown", e => {
       if(e.keyCode == 37 && d != "right") nextD = "left";
       if(e.keyCode == 38 && d != "down") nextD = "up";
@@ -50,11 +57,26 @@
       if(e.keyCode == 40 && d != "up") nextD = "down";
     });
 
+    // Mobile/Button Input
     function changeDir(dir) { 
       if(dir == "left" && d != "right") nextD = "left";
       if(dir == "up" && d != "down") nextD = "up";
       if(dir == "right" && d != "left") nextD = "right";
       if(dir == "down" && d != "up") nextD = "down";
+    }
+
+    function sendToLeaderboard(playerName, finalScore) {
+        const baseURL = `https://docs.google.com/forms/d/e/${formID}/formResponse`;
+        const formData = new FormData();
+        formData.append(nameID, playerName);
+        formData.append(scoreID, finalScore);
+
+        fetch(baseURL, { method: 'POST', mode: 'no-cors', body: formData })
+        .then(() => {
+            alert("Score saved to Cloud Leaderboard!");
+            location.reload();
+        })
+        .catch(() => location.reload());
     }
 
     function main(currentTime) {
@@ -77,7 +99,7 @@
       if(d == "right") headX += box;
       if(d == "down") headY += box;
 
-      // Wrapping
+      // Wall Wrapping Logic
       if (headX < 0) headX = canvasSize - box;
       else if (headX >= canvasSize) headX = 0;
       if (headY < 0) headY = canvasSize - box;
@@ -85,16 +107,21 @@
 
       const newHead = {x: headX, y: headY};
 
-      // Check Collision with self
+      // Check Self-Collision
       for(let i=0; i<snake.length; i++) {
         if(newHead.x == snake[i].x && newHead.y == snake[i].y) {
-          snake = [{x: 200, y: 200}]; // Reset game
+          let score = snake.length - 1;
+          let name = prompt("🏆 GAME OVER!\nScore: " + score + "\nEnter Name:", "Player 1");
+          if (name) sendToLeaderboard(name, score);
+          else location.reload();
           return;
         }
       }
 
+      // Food Logic
       if(headX == food.x && headY == food.y) {
         food = { x: Math.floor(Math.random()*19)*box, y: Math.floor(Math.random()*19)*box };
+        document.getElementById("scoreDisplay").innerText = "Score: " + (snake.length);
       } else {
         snake.pop();
       }
@@ -105,17 +132,15 @@
       ctx.fillStyle = "black";
       ctx.fillRect(0,0,canvasSize,canvasSize);
       
-      // Snake Body
+      // Draw Snake
       snake.forEach((part, index) => {
         ctx.fillStyle = index === 0 ? "#0f0" : "#050";
-        ctx.strokeStyle = "black";
-        ctx.fillRect(part.x, part.y, box, box);
-        ctx.strokeRect(part.x, part.y, box, box);
+        ctx.fillRect(part.x, part.y, box-1, box-1);
       });
 
-      // Food
+      // Draw Food
       ctx.fillStyle = "red";
-      ctx.fillRect(food.x, food.y, box, box);
+      ctx.fillRect(food.x, food.y, box-1, box-1);
     }
 
     window.requestAnimationFrame(main);
