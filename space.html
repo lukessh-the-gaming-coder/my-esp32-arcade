@@ -1,61 +1,4 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Galactic ESP32 Arcade</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <style>
-    * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-    body { background: #000; color: #0ff; text-align: center; font-family: 'Courier New', monospace; margin: 0; height: 100vh; overflow: hidden; }
-    
-    .main-wrapper { display: flex; justify-content: center; align-items: flex-start; gap: 20px; padding: 10px; height: calc(100% - 160px); }
-    canvas { background: #000; border: 2px solid #0ff; width: 300px; height: 400px; box-shadow: 0 0 15px #0ff; }
-    
-    #sidebar { background: #000; border: 1px solid #0ff; padding: 10px; width: 200px; text-align: left; font-size: 13px; }
-    #sidebar h3 { margin: 0 0 5px 0; color: #f0f; font-size: 14px; border-bottom: 1px solid #0ff; text-align: center; }
-
-    @media (max-width: 800px) {
-      .main-wrapper { flex-direction: column; align-items: center; }
-      canvas { width: 280px; height: 350px; }
-      #sidebar { width: 280px; }
-    }
-
-    .controls-wrapper { position: fixed; bottom: 0; left: 0; right: 0; height: 140px; background: #000; border-top: 1px solid #333; display: flex; align-items: center; justify-content: center; z-index: 100; }
-    .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 280px; }
-    button.ctrl { padding: 20px; font-size: 20px; background: #111; color: #0ff; border: 2px solid #0ff; border-radius: 12px; cursor: pointer; }
-    button.shoot { background: #f00; color: #fff; border-color: #fff; }
-
-    #overlay { display: none; position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); border: 4px solid #f0f; padding: 20px; width: 280px; z-index: 101; }
-  </style>
-</head>
-<body>
-
-  <div class="main-wrapper">
-    <div>
-      <div style="font-size: 18px; margin-bottom: 5px;">HITS: <span id="score">0</span> <span id="pwr-msg" style="color:#0f0;"></span></div>
-      <canvas id="gameCanvas" width="300" height="400"></canvas>
-    </div>
-
-    <div id="sidebar">
-      <h3>LOCAL STATS</h3>
-      <div id="board-content">Leaderboard offline. Set up a new Sheet for this game later!</div>
-    </div>
-  </div>
-
-  <div id="overlay">
-    <h1 style="color:#f0f; margin:0;">GAME OVER</h1>
-    <p id="finalScore" style="color:white; margin:10px;"></p>
-    <button style="background:#0ff; color:#000; padding:10px; width:100%; border:none; font-weight:bold;" onclick="location.reload()">TRY AGAIN</button>
-  </div>
-
-  <div class="controls-wrapper">
-    <div class="controls">
-      <button class="ctrl" onclick="move(-25)">◀</button>
-      <button class="ctrl shoot" onclick="shoot()">FIRE</button>
-      <button class="ctrl" onclick="move(25)">▶</button>
-    </div>
-  </div>
-
-  <script>
+<script>
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     
@@ -64,13 +7,12 @@
     let score = 0, isGameOver = false, powerTimer = 0;
     let boss = null; 
 
-    // FIXED KEYBOARD LISTENER
     window.addEventListener('keydown', (e) => {
       if(isGameOver) return;
       if(e.key === "ArrowLeft") move(-25);
       if(e.key === "ArrowRight") move(25);
       if(e.key === " " || e.key === "ArrowUp") {
-          e.preventDefault(); // Stop page from jumping
+          e.preventDefault(); 
           shoot();
       }
     });
@@ -88,8 +30,13 @@
 
     function update() {
       if(isGameOver) return;
-      if(powerTimer > 0) { powerTimer--; document.getElementById("pwr-msg").innerText = "[POW!]"; }
-      else { document.getElementById("pwr-msg").innerText = ""; }
+
+      if(powerTimer > 0) { 
+        powerTimer--; 
+        document.getElementById("pwr-msg").innerText = "[POW!]"; 
+      } else { 
+        document.getElementById("pwr-msg").innerText = ""; 
+      }
 
       bullets.forEach((b, i) => {
         b.y -= 8;
@@ -99,10 +46,15 @@
       enemies.forEach((en, i) => {
         en.y += en.speed;
         if(en.y > 365 && en.x > shipX - 15 && en.x < shipX + 25) endGame();
+        
         bullets.forEach((b, bi) => {
           if(b.x > en.x && b.x < en.x + 25 && b.y > en.y && b.y < en.y + 25) {
-            enemies.splice(i, 1); bullets.splice(bi, 1); score++;
-            if(score % 20 === 0 && !boss) boss = {x: 125, y: 30, hp: 15, dir: 1.5};
+            enemies.splice(i, 1); 
+            bullets.splice(bi, 1); 
+            score++;
+            if(score > 0 && score % 20 === 0 && !boss) {
+                boss = {x: 125, y: 30, hp: 15, dir: 1.5};
+            }
           }
         });
         if(en.y > 400) enemies.splice(i, 1);
@@ -116,13 +68,20 @@
         if(p.y > 400) powerups.splice(i, 1);
       });
 
+      // BOSS LOGIC WITH CRASH PROTECTION
       if(boss) {
         boss.x += boss.dir;
         if(boss.x > 250 || boss.x < 0) boss.dir *= -1;
+
         bullets.forEach((b, bi) => {
+          if(!boss) return; // EXTRA SAFETY: Exit if boss was killed by previous bullet in same frame
           if(b.x > boss.x && b.x < boss.x + 50 && b.y > boss.y && b.y < boss.y + 40) {
-            boss.hp--; bullets.splice(bi, 1);
-            if(boss.hp <= 0) { boss = null; score += 10; }
+            boss.hp--; 
+            bullets.splice(bi, 1);
+            if(boss.hp <= 0) { 
+              boss = null; 
+              score += 10; 
+            }
           }
         });
       }
@@ -143,6 +102,7 @@
       ctx.fillStyle = "white"; bullets.forEach(b => ctx.fillRect(b.x, b.y, 4, 10));
       ctx.fillStyle = "#f0f"; enemies.forEach(en => ctx.fillRect(en.x, en.y, 25, 25));
       ctx.fillStyle = "#0f0"; powerups.forEach(p => ctx.fillRect(p.x, p.y, 15, 15));
+      
       if(boss) {
         ctx.fillStyle = "red"; ctx.fillRect(boss.x, boss.y, 50, 30);
         ctx.fillStyle = "white"; ctx.fillRect(boss.x, boss.y - 10, (boss.hp/15)*50, 5);
@@ -158,5 +118,3 @@
     function loop() { update(); draw(); requestAnimationFrame(loop); }
     loop();
   </script>
-</body>
-</html>
