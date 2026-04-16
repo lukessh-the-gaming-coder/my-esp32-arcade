@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Galactic ESP32 Arcade</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    body { background: #000; color: #0ff; text-align: center; font-family: 'Courier New', monospace; margin: 0; height: 100vh; overflow: hidden; }
+    
+    .main-wrapper { display: flex; justify-content: center; align-items: flex-start; gap: 20px; padding: 10px; height: calc(100% - 160px); overflow-y: auto; }
+    canvas { background: #000; border: 2px solid #0ff; width: 300px; height: 400px; box-shadow: 0 0 15px #0ff; }
+    
+    #sidebar { background: #000; border: 1px solid #0ff; padding: 10px; width: 200px; text-align: left; font-size: 13px; }
+    #sidebar h3 { margin: 0 0 5px 0; color: #f0f; font-size: 14px; border-bottom: 1px solid #0ff; text-align: center; }
+    .entry { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #111; }
+
+    @media (max-width: 800px) {
+      .main-wrapper { flex-direction: column; align-items: center; }
+      canvas { width: 280px; height: 350px; }
+      #sidebar { width: 280px; }
+    }
+
+    .controls-wrapper { position: fixed; bottom: 0; left: 0; right: 0; height: 140px; background: #000; border-top: 1px solid #333; display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 280px; }
+    button.ctrl { padding: 20px; font-size: 20px; background: #111; color: #0ff; border: 2px solid #0ff; border-radius: 12px; }
+    button.shoot { background: #f00; color: #fff; border-color: #fff; }
+
+    #overlay { display: none; position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); border: 4px solid #f0f; padding: 20px; width: 280px; z-index: 101; }
+  </style>
+</head>
+<body>
+
+  <div class="main-wrapper">
+    <div>
+      <div style="font-size: 18px; margin-bottom: 5px;">HITS: <span id="score">0</span></div>
+      <canvas id="gameCanvas" width="300" height="400"></canvas>
+    </div>
+
+    <div id="sidebar">
+      <h3>TOP ACE PILOTS</h3>
+      <div id="board-content">Syncing...</div>
+    </div>
+  </div>
+
+  <div id="overlay">
+    <h1 style="color:#f0f; margin:0;">SHIP DESTROYED</h1>
+    <p id="finalScore" style="color:white; margin:10px;"></p>
+    <button style="background:#0ff; color:#000; padding:10px; width:100%; border:none; font-weight:bold;" onclick="location.reload()">REPLOY SHIP</button>
+  </div>
+
+  <div class="controls-wrapper">
+    <div class="controls">
+      <button class="ctrl" onclick="move(-20)">◀</button>
+      <button class="ctrl shoot" onclick="shoot()">FIRE</button>
+      <button class="ctrl" onclick="move(20)">▶</button>
+    </div>
+  </div>
+
+  <script>
+    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR_jIbLwH5A2hLCWRyCtA8OhWX2_O5VVaE4dBXu5VEMlQphM0LJ_L-vcuHNVTzjYwawp9W5jq0vYmA3/pub?output=csv";
+    const formURL = "https://docs.google.com/forms/d/e/1FAIpQLSeUexRWPrEYccVHlEfZl0xvcWlUJ1mp6eKwdnTHiJ-vFh-hxA/formResponse";
+    const nameID = "entry.1544627247";
+    const scoreID = "entry.1856974321";
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    
+    let shipX = 135;
+    let bullets = [];
+    let enemies = [];
+    let score = 0;
+    let isGameOver = false;
+
+    fetchLeaderboard();
+
+    function move(amt) { if(!isGameOver) shipX = Math.max(0, Math.min(270, shipX + amt)); }
+    function shoot() { if(!isGameOver) bullets.push({x: shipX + 12, y: 370}); }
+
+    // Keyboard support
+    document.addEventListener('keydown', (e) => {
+      if(e.key === "ArrowLeft") move(-20);
+      if(e.key === "ArrowRight") move(20);
+      if(e.key === " ") shoot();
+    });
+
+    function spawnEnemy() {
+      if(!isGameOver && Math.random() < 0.05) {
+        enemies.push({x: Math.random() * 270, y: 0, speed: 2 + Math.random() * 2});
+      }
+    }
+
+    function update() {
+      if(isGameOver) return;
+
+      // Update Bullets
+      bullets.forEach((b, i) => {
+        b.y -= 7;
+        if(b.y < 0) bullets.splice(i, 1);
+      });
+
+      // Update Enemies
+      enemies.forEach((en, i) => {
+        en.y += en.speed;
+        
+        // Check Collision with Ship
+        if(en.y > 360 && en.x > shipX - 20 && en.x < shipX + 30) endGame();
+        
+        // Check Collision with Bullets
+        bullets.forEach((b, bi) => {
+          if(b.x > en.x && b.x < en.x + 30 && b.y > en.y && b.y < en.y + 30) {
+            enemies.splice(i, 1);
+            bullets.splice(bi, 1);
+            score++;
+            document.getElementById("score").innerText = score;
+          }
+        });
+
+        if(en.y > 400) enemies.splice(i, 1);
+      });
+
+      spawnEnemy();
+    }
+
+    function draw() {
+      ctx.fillStyle = "black"; ctx.fillRect(0,0,300,400);
+      
+      // Draw Ship (Cyan Triangle)
+      ctx.fillStyle = "#0ff";
+      ctx.beginPath();
+      ctx.moveTo(shipX+15, 370); ctx.lineTo(shipX, 395); ctx.lineTo(shipX+30, 395);
+      ctx.fill();
+
+      // Draw Bullets (White)
+      ctx.fillStyle = "white";
+      bullets.forEach(b => ctx.fillRect(b.x, b.y, 5, 10));
+
+      // Draw Enemies (Magenta Squares)
+      ctx.fillStyle = "#f0f";
+      enemies.forEach(en => ctx.fillRect(en.x, en.y, 25, 25));
+    }
+
+    function endGame() {
+      isGameOver = true;
+      document.getElementById("finalScore").innerText = "SCORE: " + score;
+      document.getElementById("overlay").style.display = "block";
+      setTimeout(() => {
+        let n = prompt("GALAXY SAVED!\nYour Name:", "Pilot");
+        if(n) {
+          const fd = new FormData();
+          fd.append(nameID, n); fd.append(scoreID, score);
+          fetch(formURL, { method: 'POST', mode: 'no-cors', body: fd }).then(() => fetchLeaderboard());
+        }
+      }, 300);
+    }
+
+    async function fetchLeaderboard() {
+      try {
+        const res = await fetch(CSV_URL + "&cache=" + Date.now());
+        const text = await res.text();
+        const rows = text.split("\n").slice(1);
+        let best = {};
+        rows.forEach(r => {
+          const c = r.split(",");
+          if(c.length >= 3) {
+            let n = c[1].replace(/['"]+/g, '').trim();
+            let s = parseInt(c[2]);
+            if(!isNaN(s) && (!best[n] || s > best[n])) best[n] = s;
+          }
+        });
+        let top = Object.keys(best).map(n => ({n, s: best[n]})).sort((a,b)=>b.s-a.s).slice(0,10);
+        document.getElementById("board-content").innerHTML = top.map((p,i)=>`<div class='entry'><span>${i+1}.${p.n}</span><span>${p.s}</span></div>`).join("");
+      } catch(e) { }
+    }
+
+    function loop() { update(); draw(); requestAnimationFrame(loop); }
+    loop();
+  </script>
+</body>
+</html>
