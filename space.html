@@ -1,30 +1,21 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Galactic ESP32 Arcade</title>
+  <title>Galactic ESP32: Lukessh Edition</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
     * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
     body { background: #000; color: #0ff; text-align: center; font-family: 'Courier New', monospace; margin: 0; height: 100vh; overflow: hidden; }
-    
     .main-wrapper { display: flex; justify-content: center; align-items: flex-start; gap: 20px; padding: 10px; height: calc(100% - 160px); overflow-y: auto; }
     canvas { background: #000; border: 2px solid #0ff; width: 300px; height: 400px; box-shadow: 0 0 15px #0ff; }
-    
     #sidebar { background: #000; border: 1px solid #0ff; padding: 10px; width: 200px; text-align: left; font-size: 13px; }
     #sidebar h3 { margin: 0 0 5px 0; color: #f0f; font-size: 14px; border-bottom: 1px solid #0ff; text-align: center; }
     .entry { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #111; }
-
-    @media (max-width: 800px) {
-      .main-wrapper { flex-direction: column; align-items: center; }
-      canvas { width: 280px; height: 350px; }
-      #sidebar { width: 280px; }
-    }
-
+    @media (max-width: 800px) { .main-wrapper { flex-direction: column; align-items: center; } canvas { width: 280px; height: 350px; } #sidebar { width: 280px; } }
     .controls-wrapper { position: fixed; bottom: 0; left: 0; right: 0; height: 140px; background: #000; border-top: 1px solid #333; display: flex; align-items: center; justify-content: center; z-index: 100; }
     .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 280px; }
     button.ctrl { padding: 20px; font-size: 20px; background: #111; color: #0ff; border: 2px solid #0ff; border-radius: 12px; }
     button.shoot { background: #f00; color: #fff; border-color: #fff; }
-
     #overlay { display: none; position: absolute; top: 30%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.9); border: 4px solid #f0f; padding: 20px; width: 280px; z-index: 101; }
   </style>
 </head>
@@ -32,10 +23,9 @@
 
   <div class="main-wrapper">
     <div>
-      <div style="font-size: 18px; margin-bottom: 5px;">HITS: <span id="score">0</span></div>
+      <div style="font-size: 18px; margin-bottom: 5px;">HITS: <span id="score">0</span> <span id="pwr-msg" style="color:#0f0; margin-left:10px;"></span></div>
       <canvas id="gameCanvas" width="300" height="400"></canvas>
     </div>
-
     <div id="sidebar">
       <h3>TOP ACE PILOTS</h3>
       <div id="board-content">Syncing...</div>
@@ -43,9 +33,9 @@
   </div>
 
   <div id="overlay">
-    <h1 style="color:#f0f; margin:0;">SHIP DESTROYED</h1>
+    <h1 style="color:#f0f; margin:0;">GAME OVER</h1>
     <p id="finalScore" style="color:white; margin:10px;"></p>
-    <button style="background:#0ff; color:#000; padding:10px; width:100%; border:none; font-weight:bold;" onclick="location.reload()">REPLOY SHIP</button>
+    <button style="background:#0ff; color:#000; padding:10px; width:100%; border:none; font-weight:bold;" onclick="location.reload()">RESPAWN</button>
   </div>
 
   <div class="controls-wrapper">
@@ -66,31 +56,27 @@
     const ctx = canvas.getContext("2d");
     
     let shipX = 135;
-    let bullets = [];
-    let enemies = [];
-    let score = 0;
-    let isGameOver = false;
+    let bullets = [], enemies = [], powerups = [];
+    let score = 0, isGameOver = false, powerTimer = 0;
+    let boss = null; // {x, y, hp, dir}
 
     fetchLeaderboard();
 
     function move(amt) { if(!isGameOver) shipX = Math.max(0, Math.min(270, shipX + amt)); }
-    function shoot() { if(!isGameOver) bullets.push({x: shipX + 12, y: 370}); }
-
-    // Keyboard support
-    document.addEventListener('keydown', (e) => {
-      if(e.key === "ArrowLeft") move(-20);
-      if(e.key === "ArrowRight") move(20);
-      if(e.key === " ") shoot();
-    });
-
-    function spawnEnemy() {
-      if(!isGameOver && Math.random() < 0.05) {
-        enemies.push({x: Math.random() * 270, y: 0, speed: 2 + Math.random() * 2});
+    
+    function shoot() { 
+      if(isGameOver) return;
+      if(powerTimer > 0) {
+        bullets.push({x: shipX - 5, y: 370}, {x: shipX + 12, y: 370}, {x: shipX + 30, y: 370});
+      } else {
+        bullets.push({x: shipX + 12, y: 370});
       }
     }
 
     function update() {
       if(isGameOver) return;
+      if(powerTimer > 0) { powerTimer--; document.getElementById("pwr-msg").innerText = "TRIPLE!"; }
+      else { document.getElementById("pwr-msg").innerText = ""; }
 
       // Update Bullets
       bullets.forEach((b, i) => {
@@ -101,42 +87,69 @@
       // Update Enemies
       enemies.forEach((en, i) => {
         en.y += en.speed;
-        
-        // Check Collision with Ship
         if(en.y > 360 && en.x > shipX - 20 && en.x < shipX + 30) endGame();
-        
-        // Check Collision with Bullets
         bullets.forEach((b, bi) => {
-          if(b.x > en.x && b.x < en.x + 30 && b.y > en.y && b.y < en.y + 30) {
-            enemies.splice(i, 1);
-            bullets.splice(bi, 1);
-            score++;
-            document.getElementById("score").innerText = score;
+          if(b.x > en.x && b.x < en.x + 25 && b.y > en.y && b.y < en.y + 25) {
+            enemies.splice(i, 1); bullets.splice(bi, 1); score++;
+            checkBossSpawn();
           }
         });
-
         if(en.y > 400) enemies.splice(i, 1);
       });
 
-      spawnEnemy();
+      // Update Powerups
+      powerups.forEach((p, i) => {
+        p.y += 2;
+        if(p.y > 360 && p.x > shipX - 20 && p.x < shipX + 30) {
+          powerTimer = 400; powerups.splice(i, 1);
+        }
+        if(p.y > 400) powerups.splice(i, 1);
+      });
+
+      // Update Boss
+      if(boss) {
+        boss.x += boss.dir * 2;
+        if(boss.x > 250 || boss.x < 0) boss.dir *= -1;
+        bullets.forEach((b, bi) => {
+          if(b.x > boss.x && b.x < boss.x + 50 && b.y > boss.y && b.y < boss.y + 40) {
+            boss.hp--; bullets.splice(bi, 1);
+            if(boss.hp <= 0) { boss = null; score += 10; }
+          }
+        });
+      }
+
+      if(Math.random() < 0.03 && !boss) enemies.push({x: Math.random() * 270, y: 0, speed: 2 + Math.random() * 2});
+      if(Math.random() < 0.005) powerups.push({x: Math.random() * 270, y: 0});
+      document.getElementById("score").innerText = score;
+    }
+
+    function checkBossSpawn() {
+      if(score > 0 && score % 20 === 0 && !boss) {
+        boss = {x: 125, y: 30, hp: 10, dir: 1};
+      }
     }
 
     function draw() {
       ctx.fillStyle = "black"; ctx.fillRect(0,0,300,400);
       
-      // Draw Ship (Cyan Triangle)
-      ctx.fillStyle = "#0ff";
+      // Ship
+      ctx.fillStyle = powerTimer > 0 ? "#0f0" : "#0ff";
       ctx.beginPath();
       ctx.moveTo(shipX+15, 370); ctx.lineTo(shipX, 395); ctx.lineTo(shipX+30, 395);
       ctx.fill();
 
-      // Draw Bullets (White)
-      ctx.fillStyle = "white";
-      bullets.forEach(b => ctx.fillRect(b.x, b.y, 5, 10));
+      // Bullets, Enemies, Powerups
+      ctx.fillStyle = "white"; bullets.forEach(b => ctx.fillRect(b.x, b.y, 5, 10));
+      ctx.fillStyle = "#f0f"; enemies.forEach(en => ctx.fillRect(en.x, en.y, 25, 25));
+      ctx.fillStyle = "#0f0"; powerups.forEach(p => ctx.fillRect(p.x, p.y, 15, 15));
 
-      // Draw Enemies (Magenta Squares)
-      ctx.fillStyle = "#f0f";
-      enemies.forEach(en => ctx.fillRect(en.x, en.y, 25, 25));
+      // Boss
+      if(boss) {
+        ctx.fillStyle = "red";
+        ctx.fillRect(boss.x, boss.y, 50, 30);
+        ctx.fillStyle = "white";
+        ctx.fillRect(boss.x, boss.y - 10, (boss.hp/10)*50, 5); // Boss HP bar
+      }
     }
 
     function endGame() {
@@ -144,7 +157,7 @@
       document.getElementById("finalScore").innerText = "SCORE: " + score;
       document.getElementById("overlay").style.display = "block";
       setTimeout(() => {
-        let n = prompt("GALAXY SAVED!\nYour Name:", "Pilot");
+        let n = prompt("DEFEAT!\nEnter Name:", "Pilot");
         if(n) {
           const fd = new FormData();
           fd.append(nameID, n); fd.append(scoreID, score);
