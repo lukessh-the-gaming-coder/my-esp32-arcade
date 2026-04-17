@@ -1,16 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Galactic ESP32 - Lukessh Edition</title>
+  <title>Galactic ESP32 Arcade</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
     * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
     body { background: #000; color: #0ff; text-align: center; font-family: 'Courier New', monospace; margin: 0; height: 100vh; overflow: hidden; position: fixed; width: 100%; }
     .main-wrapper { display: flex; justify-content: center; align-items: flex-start; gap: 20px; padding: 10px; height: calc(100% - 160px); }
     canvas { background: #000; border: 2px solid #0ff; width: 300px; height: 400px; box-shadow: 0 0 15px #0ff; }
-    #sidebar { background: #000; border: 1px solid #0ff; padding: 10px; width: 200px; text-align: left; font-size: 13px; max-height: 100%; overflow-y: auto; }
+    #sidebar { background: #000; border: 1px solid #0ff; padding: 10px; width: 200px; text-align: left; font-size: 13px; }
     #sidebar h3 { margin: 0 0 5px 0; color: #f0f; font-size: 14px; border-bottom: 1px solid #0ff; text-align: center; }
-    .entry { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #111; }
     @media (max-width: 800px) { .main-wrapper { flex-direction: column; align-items: center; } canvas { width: 280px; height: 350px; } #sidebar { width: 280px; } }
     .controls-wrapper { position: fixed; bottom: 0; left: 0; right: 0; height: 140px; background: #000; border-top: 1px solid #333; display: flex; align-items: center; justify-content: center; z-index: 100; }
     .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 280px; }
@@ -27,15 +26,15 @@
       <canvas id="gameCanvas" width="300" height="400"></canvas>
     </div>
     <div id="sidebar">
-      <h3>TOP ACE PILOTS</h3>
-      <div id="board-content">Loading...</div>
+      <h3>STATS</h3>
+      <div id="board-content">Boss spawns every 20 hits. Defeat it for +10 bonus!</div>
     </div>
   </div>
 
   <div id="overlay">
     <h1 style="color:#f0f; margin:0;">GAME OVER</h1>
     <p id="finalScore" style="color:white; margin:10px;"></p>
-    <button style="background:#0ff; color:#000; padding:10px; width:100%; border:none; font-weight:bold; cursor:pointer;" onclick="location.reload()">REPLOY SHIP</button>
+    <button style="background:#0ff; color:#000; padding:10px; width:100%; border:none; font-weight:bold; cursor:pointer;" onclick="location.reload()">TRY AGAIN</button>
   </div>
 
   <div class="controls-wrapper">
@@ -47,19 +46,15 @@
   </div>
 
   <script>
-    // LEADERBOARD CONFIG
+    // UPDATED IDs FROM YOUR PRE-FILLED LINK
     const formURL = "https://docs.google.com/forms/d/e/1FAIpQLScAQLxjHfiUsUOiF5p_9M50kVbJm3wFkdOtnzYnm5B7UeIK3g/formResponse";
-    const nameID = "entry.1742918828"; // You may need to verify these IDs in your Form's HTML
-    const scoreID = "entry.1351187422"; 
-    // Once you Publish the new Sheet to Web as CSV, paste that link here:
-    const CSV_URL = ""; 
+    const nameID = "entry.438071494"; 
+    const scoreID = "entry.1662600885"; 
 
     const canvas = document.getElementById("gameCanvas");
     const ctx = canvas.getContext("2d");
     let shipX = 135, bullets = [], enemies = [], powerups = [];
-    let score = 0, isGameOver = false, powerTimer = 0, boss = null; 
-
-    fetchLeaderboard();
+    let score = 0, isGameOver = false, powerTimer = 0, boss = null;
 
     window.addEventListener('keydown', (e) => {
       if(isGameOver) return;
@@ -127,37 +122,27 @@
     }
 
     function endGame() {
+      if(isGameOver) return;
       isGameOver = true;
       document.getElementById("finalScore").innerText = "FINAL SCORE: " + score;
       document.getElementById("overlay").style.display = "block";
+      
       setTimeout(() => {
-        let n = prompt("PILOT DOWN! Save your score:", "Lukessh");
+        let n = prompt("PILOT DOWN! Enter your name:", "Lukessh");
         if(n) {
-          const fd = new FormData();
-          fd.append(nameID, n); fd.append(scoreID, score);
-          fetch(formURL, { method: 'POST', mode: 'no-cors', body: fd }).then(() => { alert("Score Sent!"); fetchLeaderboard(); });
+          const formData = new URLSearchParams();
+          formData.append(nameID, n);
+          formData.append(scoreID, score);
+
+          fetch(formURL, {
+            method: 'POST',
+            mode: 'no-cors',
+            body: formData
+          }).then(() => {
+            console.log("Score Sent Successfully!");
+          });
         }
       }, 500);
-    }
-
-    async function fetchLeaderboard() {
-      if(!CSV_URL) { document.getElementById("board-content").innerHTML = "Leaderboard ready for setup!"; return; }
-      try {
-        const res = await fetch(CSV_URL + "&cache=" + Date.now());
-        const text = await res.text();
-        const rows = text.split("\n").slice(1);
-        let best = {};
-        rows.forEach(r => {
-          const c = r.split(",");
-          if(c.length >= 3) {
-            let n = c[1].replace(/['"]+/g, '').trim();
-            let s = parseInt(c[2]);
-            if(!isNaN(s) && (!best[n] || s > best[n])) best[n] = s;
-          }
-        });
-        let top = Object.keys(best).map(n => ({n, s: best[n]})).sort((a,b)=>b.s-a.s).slice(0,10);
-        document.getElementById("board-content").innerHTML = top.map((p,i)=>`<div class='entry'><span>${i+1}.${p.n}</span><span>${p.s}</span></div>`).join("");
-      } catch(e) { console.log("LB Error"); }
     }
 
     function loop() { update(); draw(); requestAnimationFrame(loop); }
