@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>3D Parkour Speedrun</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #000; }
+        #ui { position: absolute; top: 20px; left: 20px; color: #fff; text-shadow: 2px 2px #000; pointer-events: none; z-index: 10; }
+        #timer { font-size: 48px; font-weight: bold; color: #0ff; }
+        #height { font-size: 18px; color: #f0f; }
+        
+        #crosshair {
+            position: absolute; top: 50%; left: 50%;
+            width: 10px; height: 10px;
+            border: 1px solid rgba(255,255,255,0.8);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+        }
+
+        #leaderboard {
+            position: absolute; top: 20px; right: 20px;
+            width: 220px; background: rgba(0,0,0,0.85);
+            border: 1px solid #0ff; color: #fff; padding: 12px;
+            font-size: 13px; max-height: 380px; overflow-y: auto; z-index: 20;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.3);
+        }
+        .entry { display: flex; justify-content: space-between; border-bottom: 1px solid #333; padding: 6px 0; }
+        .entry span:first-child { color: #0ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+        .entry span:last-child { color: #f0f; font-weight: bold; }
+
+        #msg {
+            position: absolute; bottom: 150px; left: 50%;
+            transform: translateX(-50%);
+            color: #fff; text-align: center;
+            background: rgba(0,0,0,0.85); padding: 15px 30px; border-radius: 10px;
+            border: 1px solid #0ff; z-index: 5;
+        }
+
+        #mobile-controls {
+            position: absolute; bottom: 40px; left: 0; right: 0;
+            display: flex; justify-content: center; padding: 10px;
+            pointer-events: none;
+        }
+        .btn {
+            width: 100px; height: 100px; background: rgba(0,255,255,0.2);
+            border: 3px solid #0ff; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            color: #fff; font-weight: bold; pointer-events: auto;
+            user-select: none; -webkit-user-select: none;
+            box-shadow: 0 0 15px #0ff;
+        }
+        .btn:active { background: rgba(0,255,255,0.5); transform: scale(0.95); }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="timer">0.00s</div>
+        <div id="height">ALTITUDE: 0m</div>
+        <div style="font-size: 14px; margin-top: 5px; color: #aaa;">GOAL: REACH 100m</div>
+    </div>
+
+    <div id="leaderboard">
+        <div style="text-align: center; border-bottom: 1px solid #0ff; margin-bottom: 8px; font-weight: bold; color: #0ff; letter-spacing: 1px;">PARKOUR MASTERS</div>
+        <div id="board-content">Scanning Records...</div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <div id="msg">Click to Start<br><small>(W,A,S,D to move, Space to Jump)</small></div>
+
+    <div id="mobile-controls">
+        <div class="btn" id="btn-jump">JUMP</div>
+    </div>
+
+    <script>
+        // CONFIG - NEW LINKS PROVIDED
+        const formURL = "https://docs.google.com/forms/d/e/1FAIpQLSdapZQ0CLjGB1WJyX0QCo14sob_107LW_qQhdgfk82Oy6_Yww/formResponse";
+        const nameID = "entry.1706249717"; 
+        const scoreID = "entry.24479905";  
+        
+        // ACTUAL CSV LINK
+        const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTtr4gkdH30LHPHxP17uU6aJDXHsi-grOUcjbG_pL5-vtXhIx1A7vm4N3xpK0kQZI2qgWU2Cjyx5ze9/pub?output=csv";
+
+        // Three.js Setup
+        let scene, camera, renderer;
+        let player = { height: 1.8, speed: 0.16, jumpStrength: 0.22, velocity: 0, grounded: false };
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let isPlaying = false, isFinished = false, startTime = 0;
+        let platforms = [];
+        const goalHeight = 100;
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020205);
+            scene.fog = new THREE.FogExp2(0x020205, 0.015);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            // Lighting
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const sun = new THREE.DirectionalLight(0x00ffff, 0.8);
+            sun.position.set(5, 20, 10);
+            scene.add(sun);
+
+            // Ground
+            addPlatform(0, -0.5, 0, 30, 1, 30, 0x111111);
+
+            // Level Design
+            for(let i = 1; i < 55; i++) {
+                const h = i * 2;
+                const angle = i * 0.7;
+                const dist = 5 + Math.random() * 5;
+                const x = Math.cos(angle) * dist;
+                const z = Math.sin(angle) * dist;
+                const color = new THREE.Color().setHSL((i/55), 0.8, 0.5);
+                addPlatform(x, h, z, 4, 0.5, 4, color);
+            }
+
+            // Finish Goal
+            addPlatform(0, goalHeight, 0, 15, 1, 15, 0xffffff, true);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            // Controls logic
+            window.addEventListener('resize', onResize);
+            document.addEventListener('keydown', (e) => handleKey(e.code, true));
+            document.addEventListener('keyup', (e) => handleKey(e.code, false));
+            
+            document.addEventListener('mousedown', () => {
+                if(!isFinished) document.body.requestPointerLock();
+            });
+
+            document.addEventListener('pointerlockchange', () => {
+                if(document.pointerLockElement === document.body) {
+                    isPlaying = true;
+                    if(startTime === 0) startTime = Date.now();
+                    document.getElementById('msg').style.display = 'none';
+                } else {
+                    isPlaying = false;
+                    if(!isFinished) document.getElementById('msg').style.display = 'block';
+                }
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if(document.pointerLockElement === document.body) {
+                    camera.rotation.y -= e.movementX * 0.002;
+                    camera.rotation.x -= e.movementY * 0.002;
+                    camera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, camera.rotation.x));
+                }
+            });
+
+            document.getElementById('btn-jump').addEventListener('pointerdown', (e) => {
+                if(player.grounded) player.velocity = player.jumpStrength;
+            });
+
+            camera.position.set(0, player.height, 10);
+            camera.rotation.order = 'YXZ';
+
+            fetchLeaderboard();
+        }
+
+        function addPlatform(x, y, z, w, h, d, color, isGoal = false) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mat = new THREE.MeshPhongMaterial({ color: color, emissive: isGoal ? 0xffffff : 0x000000 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, y, z);
+            scene.add(mesh);
+            platforms.push(mesh);
+        }
+
+        function handleKey(code, val) {
+            if(code === 'KeyW') moveForward = val;
+            if(code === 'KeyS') moveBackward = val;
+            if(code === 'KeyA') moveLeft = val;
+            if(code === 'KeyD') moveRight = val;
+            if(code === 'Space' && val && player.grounded) player.velocity = player.jumpStrength;
+        }
+
+        function update() {
+            if(!isPlaying || isFinished) return;
+
+            // Simple Physics
+            player.velocity -= 0.012;
+            camera.position.y += player.velocity;
+
+            const dir = new THREE.Vector3();
+            if(moveForward) dir.z -= 1;
+            if(moveBackward) dir.z += 1;
+            if(moveLeft) dir.x -= 1;
+            if(moveRight) dir.x += 1;
+            dir.normalize();
+
+            const angle = camera.rotation.y;
+            camera.position.x += (dir.x * Math.cos(angle) + dir.z * Math.sin(angle)) * player.speed;
+            camera.position.z += (dir.z * Math.cos(angle) - dir.x * Math.sin(angle)) * player.speed;
+
+            // Collision
+            player.grounded = false;
+            const ray = new THREE.Raycaster(camera.position, new THREE.Vector3(0, -1, 0), 0, player.height);
+            const hits = ray.intersectObjects(platforms);
+
+            if(hits.length > 0) {
+                const hit = hits[0];
+                if(player.velocity <= 0 && hit.distance < player.height) {
+                    camera.position.y = hit.point.y + player.height;
+                    player.velocity = 0;
+                    player.grounded = true;
+                }
+            }
+
+            if(camera.position.y < -10) { // Fall reset
+                camera.position.set(0, player.height, 10);
+                player.velocity = 0;
+            }
+
+            const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+            document.getElementById('timer').innerText = elapsed + "s";
+            document.getElementById('height').innerText = `ALTITUDE: ${Math.floor(camera.position.y)}m`;
+
+            if(camera.position.y >= goalHeight - 1) {
+                win(elapsed);
+            }
+        }
+
+        function win(time) {
+            isFinished = true;
+            isPlaying = false;
+            document.exitPointerLock();
+            
+            setTimeout(() => {
+                const name = prompt(`🏁 SUMMIT REACHED!\nTime: ${time}s\nEnter Name:`, localStorage.getItem('arcade_name') || "Player");
+                if(name) {
+                    localStorage.setItem('arcade_name', name);
+                    submitScore(name, time);
+                } else {
+                    location.reload();
+                }
+            }, 100);
+        }
+
+        function submitScore(name, time) {
+            const data = new URLSearchParams();
+            data.append(nameID, name);
+            data.append(scoreID, time);
+
+            fetch(formURL, { method: 'POST', mode: 'no-cors', body: data })
+            .then(() => {
+                setTimeout(() => location.reload(), 2000);
+            });
+        }
+
+        async function fetchLeaderboard() {
+            try {
+                const response = await fetch(`${CSV_URL}&cache=${Date.now()}`);
+                const csv = await response.text();
+                const lines = csv.split('\n').filter(l => l.trim() !== "");
+                if(lines.length <= 1) return;
+
+                const headers = lines[0].split(",");
+                const rows = lines.slice(1);
+                let bestTimes = {};
+                
+                rows.forEach(row => {
+                    const cols = row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+                    if(cols.length >= 3) {
+                        const name = cols[1].replace(/['"]+/g, '').trim();
+                        const time = parseFloat(cols[2].replace(/['"]+/g, ''));
+                        if(!isNaN(time) && name) {
+                            // Keep ONLY the fastest time (smallest number) per player
+                            if(!bestTimes[name] || time < bestTimes[name]) {
+                                bestTimes[name] = time;
+                            }
+                        }
+                    }
+                });
+
+                const sorted = Object.entries(bestTimes)
+                    .sort((a, b) => a[1] - b[1]) // Fast times (lower) at top
+                    .slice(0, 10);
+
+                document.getElementById('board-content').innerHTML = sorted.map(([n, t], i) => `
+                    <div class="entry">
+                        <span>${i+1}. ${n}</span>
+                        <span>${t.toFixed(2)}s</span>
+                    </div>
+                `).join('');
+            } catch(e) {
+                document.getElementById('board-content').innerHTML = "Unable to load scores.";
+            }
+        }
+
+        function onResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            update();
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+    </script>
+</body>
+</html>
