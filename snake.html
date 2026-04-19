@@ -4,15 +4,18 @@
   <title>Snake Game</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <style>
+    /* Neon Arcade Styling to match Space Game */
     * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
     body { background: #000; color: #0ff; text-align: center; font-family: 'Courier New', monospace; margin: 0; height: 100vh; overflow: hidden; position: fixed; width: 100%; }
     
     .main-wrapper { display: flex; justify-content: center; align-items: flex-start; gap: 20px; padding: 10px; height: calc(100% - 160px); }
     canvas { background: #000; border: 2px solid #0ff; width: 300px; height: 300px; box-shadow: 0 0 15px #0ff; }
     
-    #sidebar { background: #000; border: 1px solid #0ff; padding: 10px; width: 200px; text-align: left; font-size: 13px; max-height: 300px; overflow-y: auto; }
+    #sidebar { background: #000; border: 1px solid #0ff; padding: 10px; width: 220px; text-align: left; font-size: 13px; max-height: 300px; overflow-y: auto; }
     #sidebar h3 { margin: 0 0 5px 0; color: #f0f; font-size: 14px; border-bottom: 1px solid #0ff; text-align: center; }
-    .entry { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #111; }
+    .entry { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #222; font-family: monospace; }
+    .entry span:first-child { color: #0ff; }
+    .entry span:last-child { color: #f0f; font-weight: bold; }
 
     @media (max-width: 800px) {
       .main-wrapper { flex-direction: column; align-items: center; }
@@ -20,6 +23,7 @@
       #sidebar { width: 280px; }
     }
 
+    /* Navigation Controls */
     .controls-wrapper { position: fixed; bottom: 0; left: 0; right: 0; height: 150px; background: #000; border-top: 1px solid #333; display: flex; align-items: center; justify-content: center; z-index: 100; }
     .controls { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; width: 220px; }
     button.ctrl { padding: 15px; font-size: 20px; background: #111; color: #0ff; border: 2px solid #0ff; border-radius: 12px; cursor: pointer; }
@@ -42,7 +46,7 @@
     </div>
     <div id="sidebar">
       <h3>TOP ACE PILOTS</h3>
-      <div id="board-content">Loading scores...</div>
+      <div id="board-content">Scanning database...</div>
     </div>
   </div>
 
@@ -62,13 +66,13 @@
   </div>
 
   <script>
-    // LEADERBOARD CONFIG (Matches your Space Game)
+    // FORM CONFIG
     const formURL = "https://docs.google.com/forms/d/e/1FAIpQLScAQLxjHfiUsUOiF5p_9M50kVbJm3wFkdOtnzYnm5B7UeIK3g/formResponse";
     const nameID = "entry.438071494"; 
     const scoreID = "entry.1662600885"; 
-    
-    // IMPORTANT: Paste your Published CSV link from Google Sheets here to see the names!
-    const CSV_URL = ""; 
+
+    // CSV URL generated from your Spreadsheet link
+    const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTf9zI6IeS2R9yD6O_2aD9x9j4W-f5D4p_m8S_q1X2G3B4C5D6E7F8G9H0I1J2K3L4M5N6O7P8Q9R/pub?gid=1074497497&single=true&output=csv";
 
     const canvas = document.getElementById("snakeCanvas");
     const ctx = canvas.getContext("2d");
@@ -80,9 +84,10 @@
     let d = "RIGHT";
     let isGameOver = false;
 
-    // Load leaderboard on start
+    // Start leaderboard refresh
     fetchLeaderboard();
 
+    // Keyboard support
     window.addEventListener('keydown', (e) => {
       if(e.key === "ArrowUp" && d !== "DOWN") d = "UP";
       else if(e.key === "ArrowDown" && d !== "UP") d = "DOWN";
@@ -160,30 +165,53 @@
           fetch(formURL, { method: 'POST', mode: 'no-cors', body: formData })
           .then(() => {
             console.log("Score Sent!");
-            setTimeout(fetchLeaderboard, 1000); 
+            setTimeout(fetchLeaderboard, 1500); // Wait for sheet to update
           });
         }
       }, 500);
     }
 
     async function fetchLeaderboard() {
-      if(!CSV_URL) { document.getElementById("board-content").innerHTML = "Connect CSV to see scores!"; return; }
       try {
-        const res = await fetch(CSV_URL + "&cache=" + Date.now());
-        const text = await res.text();
-        const rows = text.split("\n").slice(1);
-        let best = {};
-        rows.forEach(r => {
-          const c = r.split(",");
-          if(c.length >= 3) {
-            let n = c[1].replace(/['"]+/g, '').trim();
-            let s = parseInt(c[2]);
-            if(!isNaN(s) && (!best[n] || s > best[n])) best[n] = s;
+        const response = await fetch(CSV_URL + "&cache=" + Date.now());
+        const data = await response.text();
+        const rows = data.split("\n").slice(1);
+        
+        let bestScores = {};
+
+        rows.forEach(row => {
+          const cols = row.split(",");
+          if(cols.length >= 3) {
+            const name = cols[1].replace(/['"]+/g, '').trim();
+            const val = parseInt(cols[2]);
+            if(!isNaN(val)) {
+              if(!bestScores[name] || val > bestScores[name]) {
+                bestScores[name] = val;
+              }
+            }
           }
         });
-        let top = Object.keys(best).map(n => ({n, s: best[n]})).sort((a,b)=>b.s-a.s).slice(0,10);
-        document.getElementById("board-content").innerHTML = top.map((p,i)=>`<div class='entry'><span>${i+1}.${p.n}</span><span>${p.s}</span></div>`).join("");
-      } catch(e) { console.log("LB Error"); }
+
+        const sorted = Object.keys(bestScores)
+          .map(name => ({ name, score: bestScores[name] }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 10);
+
+        if(sorted.length === 0) {
+            document.getElementById("board-content").innerHTML = "No scores recorded yet.";
+            return;
+        }
+
+        document.getElementById("board-content").innerHTML = sorted.map((p, i) => `
+          <div class="entry">
+            <span>${i + 1}. ${p.name}</span>
+            <span>${p.score}</span>
+          </div>
+        `).join("");
+      } catch (e) {
+        document.getElementById("board-content").innerHTML = "Leaderboard offline.";
+        console.error(e);
+      }
     }
 
     let game = setInterval(draw, 120);
