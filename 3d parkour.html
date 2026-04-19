@@ -283,6 +283,7 @@
                     }
                 });
 
+                // Display Top 10 fastest times
                 const sorted = Object.entries(bestTimes)
                     .sort((a, b) => a[1] - b[1]) // Fast times (lower) at top
                     .slice(0, 10);
