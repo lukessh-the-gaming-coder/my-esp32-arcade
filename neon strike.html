@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Neon Strike</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #0a0a0c;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            color: white;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .menu-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            z-index: 10;
+        }
+        .btn {
+            background: #3b82f6;
+            color: white;
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            margin-top: 20px;
+            pointer-events: auto;
+        }
+        .btn:hover {
+            background: #2563eb;
+            transform: scale(1.05);
+        }
+        .stat-bar {
+            width: 200px;
+            height: 10px;
+            background: #333;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        #health-inner {
+            width: 100%;
+            height: 100%;
+            background: #ef4444;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="flex justify-between items-start">
+            <div>
+                <div class="text-sm uppercase tracking-widest opacity-70">Health</div>
+                <div class="stat-bar mt-1"><div id="health-inner"></div></div>
+                <div id="score-display" class="text-2xl font-bold mt-2">Score: 0</div>
+            </div>
+            <div class="text-right">
+                <div id="level-display" class="text-xl font-bold text-blue-400">Level 1</div>
+                <div id="weapon-display" class="text-sm opacity-70">Standard Blaster</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Screen -->
+    <div id="start-screen" class="menu-overlay">
+        <h1 class="text-6xl font-black text-blue-500 mb-2 italic">NEON STRIKE</h1>
+        <p class="text-gray-400 mb-8">Defend the sector from incoming drones.</p>
+        <div class="text-center text-sm text-gray-500 mb-6">
+            <p>WASD / Arrows to Move</p>
+            <p>Mouse to Aim & Shoot</p>
+            <p>(Touch & Drag on Mobile)</p>
+        </div>
+        <button class="btn" onclick="startGame()">INITIALIZE MISSION</button>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="menu-overlay hidden">
+        <h2 class="text-4xl font-bold text-red-500 mb-2">MISSION FAILED</h2>
+        <p id="final-score" class="text-xl mb-6">Score: 0</p>
+        <button class="btn" onclick="startGame()">REDEPLOY</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const uiScore = document.getElementById('score-display');
+        const uiLevel = document.getElementById('level-display');
+        const uiWeapon = document.getElementById('weapon-display');
+        const uiHealth = document.getElementById('health-inner');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+
+        let width, height;
+        let animationId;
+        let isGameRunning = false;
+
+        // Constants for balancing
+        const POINTS_PER_LEVEL = 150; // Reduced from 500 for faster upgrades
+
+        // Game State
+        const player = {
+            x: 0,
+            y: 0,
+            radius: 15,
+            color: '#3b82f6',
+            speed: 5,
+            health: 100,
+            maxHealth: 100,
+            score: 0,
+            level: 1,
+            weaponType: 'single'
+        };
+
+        let projectiles = [];
+        let enemies = [];
+        let particles = [];
+        let keys = {};
+        let mouse = { x: 0, y: 0, pressed: false };
+        let lastFired = 0;
+        let spawnTimer = 0;
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            if (!isGameRunning) {
+                player.x = width / 2;
+                player.y = height / 2;
+            }
+        }
+
+        window.addEventListener('resize', resize);
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+        window.addEventListener('mousemove', e => {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+        });
+        window.addEventListener('mousedown', () => mouse.pressed = true);
+        window.addEventListener('mouseup', () => mouse.pressed = false);
+
+        window.addEventListener('touchstart', e => {
+            mouse.pressed = true;
+            updateTouch(e);
+        });
+        window.addEventListener('touchmove', e => {
+            updateTouch(e);
+            e.preventDefault();
+        }, { passive: false });
+        window.addEventListener('touchend', () => mouse.pressed = false);
+
+        function updateTouch(e) {
+            if (e.touches.length > 0) {
+                mouse.x = e.touches[0].clientX;
+                mouse.y = e.touches[0].clientY;
+            }
+        }
+
+        class Enemy {
+            constructor(x, y, type = 'basic') {
+                this.x = x;
+                this.y = y;
+                this.type = type;
+                this.health = type === 'tank' ? 3 : 1;
+                this.radius = type === 'tank' ? 25 : 15;
+                this.color = type === 'tank' ? '#f59e0b' : '#ef4444';
+                this.speed = type === 'fast' ? 4 : (type === 'tank' ? 1 : 2.5);
+                this.angle = 0;
+            }
+
+            update() {
+                const dx = player.x - this.x;
+                const dy = player.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > 0) {
+                    this.x += (dx / dist) * this.speed;
+                    this.y += (dy / dist) * this.speed;
+                }
+                this.angle += 0.05;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                if (this.type === 'tank') {
+                    ctx.rect(-15, -15, 30, 30);
+                } else {
+                    ctx.moveTo(0, -this.radius);
+                    ctx.lineTo(this.radius, this.radius);
+                    ctx.lineTo(-this.radius, this.radius);
+                    ctx.closePath();
+                }
+                ctx.stroke();
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = this.color;
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class Projectile {
+            constructor(x, y, targetX, targetY) {
+                this.x = x;
+                this.y = y;
+                const dx = targetX - x;
+                const dy = targetY - y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                this.vx = (dx / dist) * 12;
+                this.vy = (dy / dist) * 12;
+                this.radius = 4;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = '#60a5fa';
+                ctx.fill();
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#60a5fa';
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.vx = (Math.random() - 0.5) * 10;
+                this.vy = (Math.random() - 0.5) * 10;
+                this.alpha = 1;
+                this.decay = Math.random() * 0.02 + 0.02;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha -= this.decay;
+            }
+
+            draw() {
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function spawnEnemy() {
+            let x, y;
+            if (Math.random() < 0.5) {
+                x = Math.random() < 0.5 ? -50 : width + 50;
+                y = Math.random() * height;
+            } else {
+                x = Math.random() * width;
+                y = Math.random() < 0.5 ? -50 : height + 50;
+            }
+
+            let type = 'basic';
+            if (player.level >= 2 && Math.random() > 0.8) type = 'fast';
+            if (player.level >= 4 && Math.random() > 0.9) type = 'tank';
+
+            enemies.push(new Enemy(x, y, type));
+        }
+
+        function createExplosion(x, y, color) {
+            for (let i = 0; i < 12; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function fireWeapon() {
+            const now = Date.now();
+            const cooldown = player.weaponType === 'burst' ? 100 : 200;
+
+            if (now - lastFired > cooldown) {
+                const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+                
+                if (player.weaponType === 'single' || player.weaponType === 'burst') {
+                    projectiles.push(new Projectile(player.x, player.y, mouse.x, mouse.y));
+                } else if (player.weaponType === 'spread') {
+                    // Spread fires 3 shots at once
+                    for (let i = -1; i <= 1; i++) {
+                        const spreadAngle = angle + (i * 0.2);
+                        const targetX = player.x + Math.cos(spreadAngle) * 100;
+                        const targetY = player.y + Math.sin(spreadAngle) * 100;
+                        projectiles.push(new Projectile(player.x, player.y, targetX, targetY));
+                    }
+                }
+                lastFired = now;
+            }
+        }
+
+        function update() {
+            if (!isGameRunning) return;
+
+            if (keys['KeyW'] || keys['ArrowUp']) player.y -= player.speed;
+            if (keys['KeyS'] || keys['ArrowDown']) player.y += player.speed;
+            if (keys['KeyA'] || keys['ArrowLeft']) player.x -= player.speed;
+            if (keys['KeyD'] || keys['ArrowRight']) player.x += player.speed;
+
+            player.x = Math.max(player.radius, Math.min(width - player.radius, player.x));
+            player.y = Math.max(player.radius, Math.min(height - player.radius, player.y));
+
+            if (mouse.pressed) fireWeapon();
+
+            spawnTimer++;
+            const spawnRate = Math.max(10, 60 - (player.level * 4));
+            if (spawnTimer > spawnRate) {
+                spawnEnemy();
+                spawnTimer = 0;
+            }
+
+            projectiles.forEach((p, pi) => {
+                p.update();
+                if (p.x < 0 || p.x > width || p.y < 0 || p.y > height) {
+                    projectiles.splice(pi, 1);
+                }
+            });
+
+            enemies.forEach((e, ei) => {
+                e.update();
+                
+                const dx = e.x - player.x;
+                const dy = e.y - player.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < e.radius + player.radius) {
+                    player.health -= 10;
+                    uiHealth.style.width = player.health + '%';
+                    createExplosion(e.x, e.y, e.color);
+                    enemies.splice(ei, 1);
+                    if (player.health <= 0) endGame();
+                }
+
+                projectiles.forEach((p, pi) => {
+                    const pdx = e.x - p.x;
+                    const pdy = e.y - p.y;
+                    const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+                    if (pdist < e.radius + p.radius) {
+                        e.health--;
+                        projectiles.splice(pi, 1);
+                        if (e.health <= 0) {
+                            createExplosion(e.x, e.y, e.color);
+                            enemies.splice(ei, 1);
+                            player.score += (e.type === 'tank' ? 50 : 10);
+                            checkLevelUp();
+                        }
+                    }
+                });
+            });
+
+            particles.forEach((p, i) => {
+                p.update();
+                if (p.alpha <= 0) particles.splice(i, 1);
+            });
+
+            uiScore.innerText = `Score: ${player.score}`;
+        }
+
+        function checkLevelUp() {
+            const nextLevel = Math.floor(player.score / POINTS_PER_LEVEL) + 1;
+            if (nextLevel > player.level) {
+                player.level = nextLevel;
+                uiLevel.innerText = `Level ${player.level}`;
+                
+                // Weapon Upgrades at specific milestones
+                if (player.level >= 3 && player.level < 6) {
+                    player.weaponType = 'burst';
+                    uiWeapon.innerText = 'Rapid Burst';
+                } else if (player.level >= 6) {
+                    player.weaponType = 'spread';
+                    uiWeapon.innerText = 'Wide Spread';
+                }
+            }
+        }
+
+        function draw() {
+            ctx.fillStyle = '#0a0a0c';
+            ctx.fillRect(0, 0, width, height);
+
+            ctx.strokeStyle = '#1a1a1f';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            for (let x = 0; x < width; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+            }
+            for (let y = 0; y < height; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+            }
+
+            particles.forEach(p => p.draw());
+            projectiles.forEach(p => p.draw());
+            enemies.forEach(e => e.draw());
+
+            ctx.save();
+            ctx.translate(player.x, player.y);
+            const angle = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+            ctx.rotate(angle);
+            
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = player.color;
+            ctx.fillStyle = player.color;
+            ctx.beginPath();
+            ctx.moveTo(15, 0);
+            ctx.lineTo(-10, -10);
+            ctx.lineTo(-10, 10);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+
+            requestAnimationFrame(() => {
+                update();
+                draw();
+            });
+        }
+
+        function startGame() {
+            player.health = 100;
+            player.score = 0;
+            player.level = 1;
+            player.weaponType = 'single';
+            player.x = width / 2;
+            player.y = height / 2;
+            enemies = [];
+            projectiles = [];
+            particles = [];
+            
+            uiHealth.style.width = '100%';
+            uiLevel.innerText = 'Level 1';
+            uiWeapon.innerText = 'Standard Blaster';
+            
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            isGameRunning = true;
+        }
+
+        function endGame() {
+            isGameRunning = false;
+            document.getElementById('final-score').innerText = `Final Score: ${player.score}`;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        resize();
+        draw();
+    </script>
+</body>
+</html>
